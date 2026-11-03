@@ -1,0 +1,424 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRIDIRON 27 | 3D Arcade Football</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#07101b;color:white;font-family:Arial,sans-serif;overflow:hidden}
+canvas{display:block}
+#hud{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:#09121eea;border:1px solid #5c7186;border-radius:14px;padding:10px 18px;text-align:center;min-width:310px}
+#score{font-size:21px;font-weight:900}
+#details{font-size:12px;color:#b8d4e8;margin-top:6px}
+#message{position:absolute;top:28%;width:100%;text-align:center;font-size:clamp(23px,5vw,48px);font-weight:900;text-shadow:0 3px 14px black;pointer-events:none}
+#menu{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:#08111ef5;border:1px solid #647d95;border-radius:20px;padding:27px;text-align:center;max-width:440px;width:90%;box-shadow:0 20px 70px #000b}
+#menu h1{font-size:38px;margin:5px;color:#51e5a0}
+#menu p{color:#c8d8e6;line-height:1.5}
+button{background:#21b97d;color:white;border:0;border-radius:10px;padding:12px 17px;font-weight:bold;cursor:pointer}
+button:hover{background:#169966}
+#actions{position:absolute;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px}
+#actions button{background:#17283fe8;border:1px solid #7c9bb9}
+#actions button:hover{background:#236a9c}
+#controls{position:absolute;bottom:20px;left:20px;background:#09121ecd;padding:12px;border-radius:12px;font-size:12px;color:#d7e7f4;line-height:1.8}
+#touch{display:none;position:absolute;bottom:24px;left:12px}
+#touch button{padding:13px;margin:2px;background:#223a55dd;touch-action:none}
+@media(pointer:coarse){
+#touch{display:block}
+#controls{display:none}
+#actions{bottom:25px;right:10px}
+#actions button{padding:11px}
+}
+</style>
+</head>
+<body>
+
+<div id="hud">
+ <div id="score">HOME 0 — 0 AWAY</div>
+ <div id="details">1ST & 10 | BALL ON 25</div>
+</div>
+<div id="message"></div>
+
+<div id="menu">
+ <h1>🏈 GRIDIRON 27</h1>
+ <h3>3D ARCADE FOOTBALL</h3>
+ <p>Welcome to the field! Run the ball, throw to three receivers,
+ break tackles, and score touchdowns.</p>
+ <p>WASD or arrow keys to move. Press 1, 2, or 3 to pass.
+ Press Enter to snap.</p>
+ <button id="start">START GAME</button>
+</div>
+
+<div id="controls">
+ <b>CONTROLS</b><br>
+ WASD / Arrows — Move<br>
+ Enter — Snap football<br>
+ 1 / 2 / 3 — Pass to receiver<br>
+ Reach the far end zone to score
+</div>
+
+<div id="touch">
+ <div style="text-align:center"><button data-key="w">▲</button></div>
+ <button data-key="a">◀</button>
+ <button data-key="s">▼</button>
+ <button data-key="d">▶</button>
+</div>
+
+<div id="actions">
+ <button id="snap">SNAP BALL</button>
+ <button data-pass="0">PASS TO WR 1</button>
+ <button data-pass="1">PASS TO WR 2</button>
+ <button data-pass="2">PASS TO WR 3</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x101e32);
+scene.fog=new THREE.Fog(0x101e32,105,240);
+
+const camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,450);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xbadfff,0x23351b,2.1));
+const sun=new THREE.DirectionalLight(0xffffff,2.4);
+sun.position.set(-35,85,35);
+sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-85;
+sun.shadow.camera.right=85;
+sun.shadow.camera.top=85;
+sun.shadow.camera.bottom=-85;
+scene.add(sun);
+
+const mat=(color)=>new THREE.MeshStandardMaterial({color,roughness:.75});
+const green=mat(0x147541),white=mat(0xffffff);
+const blue=mat(0x2478ec),red=mat(0xeb4545);
+const yellow=mat(0xffd54b),brown=mat(0x75432a);
+
+function box(w,h,d,m,x,y,z){
+ const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);
+ o.position.set(x,y,z);
+ o.receiveShadow=true;
+ o.castShadow=true;
+ scene.add(o);
+ return o;
+}
+function textSprite(t,color="#ffffff",scale=6){
+ const c=document.createElement("canvas");
+ c.width=512;c.height=128;
+ const ctx=c.getContext("2d");
+ ctx.fillStyle=color;
+ ctx.font="bold 75px Arial";
+ ctx.textAlign="center";
+ ctx.fillText(t,256,90);
+ const texture=new THREE.CanvasTexture(c);
+ const mesh=new THREE.Sprite(new THREE.SpriteMaterial({map:texture,transparent:true}));
+ mesh.scale.set(scale,scale/4,1);
+ return mesh;
+}
+
+// Stadium
+box(140,1,200,mat(0x152334),0,-1.2,0);
+box(54,.3,102,green,0,-.5,0);
+box(54,.33,10,mat(0x20499e),0,-.3,-55);
+box(54,.33,10,mat(0x9a262c),0,-.3,55);
+
+for(let z=-50;z<=50;z+=5){
+ box(53,.035,z%10===0?.17:.075,white,0,-.28,z);
+}
+for(let x of [-26.3,26.3]){
+ box(.2,.04,100,white,x,-.25,0);
+}
+for(let z=-45;z<=45;z+=10){
+ const number=Math.min(50,50-Math.abs(z));
+ for(const x of [-21,21]){
+  const label=textSprite(String(number));
+  label.position.set(x,.15,z);
+  scene.add(label);
+ }
+}
+for(let z of [-57,57]){
+ const post=mat(0xffeb49);
+ box(.3,10,.3,post,0,5,z);
+ box(11,.3,.3,post,0,10,z);
+ for(let x of [-5.5,5.5])box(.25,5,.25,post,x,12.5,z);
+}
+for(let side of [-1,1]){
+ for(let level=0;level<8;level++){
+  box(8,1.3,145,mat(level%2?0x35465b:0x445a70),
+    side*(32+level*2.6),level*2.1,0);
+ }
+}
+for(let z of [-75,75]){
+ box(115,11,3,mat(0x26394c),0,8,z);
+}
+for(let x of [-45,45]){
+ for(let z of [-67,67]){
+  box(.65,28,.65,mat(0x788b9b),x,14,z);
+  const lamp=box(8,2,1,mat(0xffffff),x,29,z);
+  lamp.material.emissive=new THREE.Color(0xffffff);
+  lamp.material.emissiveIntensity=.8;
+ }
+}
+
+// Football players made from 3D shapes
+function athlete(color,number){
+ const g=new THREE.Group();
+ const jersey=mat(color);
+ const skin=mat(0xc88b59);
+ const pants=mat(0xe4e8ee);
+ function part(w,h,d,m,x,y,z){
+  const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);
+  o.position.set(x,y,z);
+  o.castShadow=true;g.add(o);
+ }
+ part(1.25,1.5,.75,jersey,0,2.1,0);
+ part(1.05,.75,.77,pants,0,1.05,0);
+ part(.38,1.1,.42,pants,-.33,.45,0);
+ part(.38,1.1,.42,pants,.33,.45,0);
+ part(.37,1.3,.4,jersey,-.84,2.1,0);
+ part(.37,1.3,.4,jersey,.84,2.1,0);
+ part(.77,.77,.77,skin,0,3.24,0);
+ part(.93,.49,.91,jersey,0,3.65,0);
+ part(.85,.18,.2,white,0,3.18,-.43);
+ const label=textSprite(String(number),"#ffffff",1.05);
+ label.position.set(0,2.3,-.41);
+ g.add(label);
+ scene.add(g);
+ g.userData.speed=0;
+ return g;
+}
+const qb=athlete(0x2478ec,7);
+const receivers=[
+ athlete(0x2478ec,11),
+ athlete(0x2478ec,13),
+ athlete(0x2478ec,88)
+];
+const defenders=Array.from({length:5},(_,i)=>athlete(0xeb4545,20+i));
+
+const football=new THREE.Mesh(
+ new THREE.SphereGeometry(.36,12,8),brown);
+football.scale.set(.75,.7,1.3);
+football.castShadow=true;
+scene.add(football);
+
+const marker=box(1,.08,1,yellow,0,-.12,0);
+const keys={};
+const touchButtons=document.querySelectorAll("[data-key]");
+document.addEventListener("keydown",e=>{
+ const k=e.key.toLowerCase();
+ keys[k]=true;
+ if(["arrowup","arrowdown","arrowleft","arrowright"," "].includes(k))
+  e.preventDefault();
+ if(e.repeat)return;
+ if(k==="enter")snap();
+ if(["1","2","3"].includes(k))pass(Number(k)-1);
+});
+document.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+window.addEventListener("blur",()=>{for(const k in keys)keys[k]=false});
+touchButtons.forEach(b=>{
+ b.addEventListener("pointerdown",e=>{
+  e.preventDefault();keys[b.dataset.key]=true;
+  b.setPointerCapture(e.pointerId);
+ });
+ for(const event of ["pointerup","pointercancel","lostpointercapture"])
+  b.addEventListener(event,()=>keys[b.dataset.key]=false);
+});
+
+let home=0,spot=25,down=1,target=15;
+let playing=false,started=false,carrier=qb;
+let passing=false,flight=0,passTarget=null,passStart=null;
+let playTime=0,waiting=false;
+let previous=performance.now();
+const scoreEl=document.getElementById("score");
+const detailEl=document.getElementById("details");
+const messageEl=document.getElementById("message");
+
+function announce(t){
+ messageEl.textContent=t;
+}
+function hud(){
+ scoreEl.textContent=`HOME ${home} — 0 AWAY`;
+ const distance=Math.max(1,Math.ceil(spot-target));
+ detailEl.textContent=
+  `${["1ST","2ND","3RD","4TH"][down-1]} & ${distance} | BALL ON ${Math.round(50-spot)} | TD: ${home/7}`;
+}
+function setup(){
+ playing=false;passing=false;waiting=false;carrier=qb;
+ qb.position.set(0,0,spot+3);
+ receivers.forEach((r,i)=>{
+  r.position.set([-17,0,17][i],0,spot+1);
+  r.rotation.y=0;
+ });
+ defenders.forEach((d,i)=>{
+  d.position.set([-18,-9,0,9,18][i],0,spot-7-(i%2)*3);
+ });
+ football.visible=true;
+ football.position.set(qb.position.x,2.4,qb.position.z-.6);
+ marker.position.set(0,-.14,target);
+ hud();
+ announce("PRESS ENTER OR SNAP");
+}
+function snap(){
+ if(!started||playing||waiting)return;
+ playing=true;playTime=0;carrier=qb;
+ announce("");
+}
+function pass(i){
+ if(!playing||carrier!==qb||passing||playTime>6)return;
+ passing=true;
+ flight=0;
+ passTarget=receivers[i];
+ passStart=football.position.clone();
+ announce("PASS!");
+}
+function finish(result,endingSpot,complete=true){
+ if(!playing)return;
+ playing=false;passing=false;waiting=true;
+ football.visible=true;
+ announce(result);
+ if(result==="TOUCHDOWN!"){
+  home+=7;spot=25;down=1;target=15;
+ }else{
+  if(complete)spot=Math.min(49,Math.max(-49,endingSpot));
+  if(spot<=target){
+   down=1;target=spot-10;
+   if(result==="TACKLED!")announce("FIRST DOWN!");
+  }else{
+   down++;
+   if(down>4){
+    announce("TURNOVER ON DOWNS");
+    spot=25;down=1;target=15;
+   }
+  }
+ }
+ hud();
+ setTimeout(()=>{
+  if(started)setup();
+ },1400);
+}
+function moveToward(obj,goal,speed,dt){
+ const dx=goal.x-obj.position.x;
+ const dz=goal.z-obj.position.z;
+ const dist=Math.hypot(dx,dz);
+ if(dist>.01){
+  const step=Math.min(speed*dt,dist);
+  obj.position.x+=dx/dist*step;
+  obj.position.z+=dz/dist*step;
+  obj.rotation.y=Math.atan2(-dx,-dz);
+ }
+}
+function update(dt){
+ if(!started)return;
+
+ if(playing){
+  playTime+=dt;
+  const dx=Number(keys.d||keys.arrowright)-Number(keys.a||keys.arrowleft);
+  const dz=Number(keys.s||keys.arrowdown)-Number(keys.w||keys.arrowup);
+  const length=Math.hypot(dx,dz);
+  if(length){
+   const speed=carrier===qb?8.5:10.5;
+   carrier.position.x+=dx/length*speed*dt;
+   carrier.position.z+=dz/length*speed*dt;
+   carrier.rotation.y=Math.atan2(-dx,-dz);
+  }
+  carrier.position.x=THREE.MathUtils.clamp(carrier.position.x,-25,25);
+  carrier.position.z=THREE.MathUtils.clamp(carrier.position.z,-51,49);
+
+  receivers.forEach((r,i)=>{
+   if(r!==carrier){
+    const routeX=[-17,-3,17][i];
+    const routeZ=Math.max(-49,spot-12-playTime*[6,7,5][i]);
+    moveToward(r,{x:routeX,z:routeZ},[9,10,8][i],dt);
+   }
+  });
+
+  if(passing){
+   flight+=dt/.65;
+   const t=Math.min(1,flight);
+   const dest=passTarget.position.clone().add(new THREE.Vector3(0,2.3,0));
+   football.position.lerpVectors(passStart,dest,t);
+   football.position.y+=Math.sin(t*Math.PI)*4;
+   if(t>=1){
+    passing=false;
+    const covered=defenders.some(d=>
+      d.position.distanceTo(passTarget.position)<2.4);
+    if(covered){
+     finish("PASS INCOMPLETE",spot,false);
+    }else{
+     carrier=passTarget;
+     announce("CATCH! RUN!");
+     setTimeout(()=>{if(playing)announce("");},650);
+    }
+   }
+  }else{
+   football.position.set(
+    carrier.position.x,
+    2.2,
+    carrier.position.z-.55
+   );
+  }
+
+  defenders.forEach((d,i)=>{
+   let goal;
+   if(passing)goal=passTarget.position;
+   else if(carrier===qb&&playTime<1.6)
+    goal=i<2?receivers[i].position:qb.position;
+   else goal=carrier.position;
+   moveToward(d,goal,6.2+(i%2)*.7,dt);
+  });
+
+  if(!passing){
+   if(carrier.position.z<=-49.5){
+    finish("TOUCHDOWN!",-50);
+   }else if(defenders.some(d=>
+     d.position.distanceTo(carrier.position)<1.55)){
+    finish("TACKLED!",carrier.position.z);
+   }else if(playTime>18){
+    finish("PLAY OVER",carrier.position.z);
+   }
+  }
+ }
+
+ const focus=carrier.position;
+ const desired=new THREE.Vector3(
+  focus.x*.5+13,
+  22,
+  focus.z+25
+ );
+ camera.position.lerp(desired,Math.min(1,dt*3));
+ camera.lookAt(focus.x,1.5,focus.z-10);
+}
+function animate(now){
+ requestAnimationFrame(animate);
+ const dt=Math.min((now-previous)/1000,.05);
+ previous=now;
+ update(dt);
+ renderer.render(scene,camera);
+}
+document.getElementById("start").onclick=()=>{
+ document.getElementById("menu").style.display="none";
+ started=true;home=0;spot=25;down=1;target=15;
+ setup();
+};
+document.getElementById("snap").onclick=snap;
+document.querySelectorAll("[data-pass]").forEach(b=>
+ b.onclick=()=>pass(Number(b.dataset.pass))
+);
+window.addEventListener("resize",()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+setup();
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
